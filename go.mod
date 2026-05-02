@@ -1,10 +1,12 @@
-module github.com/bep/gomaintemplate
+module github.com/bep/mygrep
 
 go 1.25.0
 
 require (
 	github.com/bep/helpers v0.8.0
+	github.com/charlievieth/fastwalk v1.0.14
 	github.com/rogpeppe/go-internal v1.14.1
+	golang.org/x/sync v0.20.0
 )
 
 require (
