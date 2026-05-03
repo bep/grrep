@@ -1,11 +1,8 @@
 package main
 
 import (
-	"fmt"
 	"os"
-	"strings"
 	"testing"
-	"time"
 
 	"github.com/bep/helpers/envhelpers"
 	"github.com/rogpeppe/go-internal/testscript"
@@ -25,10 +22,7 @@ func TestScripts(t *testing.T) {
 
 func TestMain(m *testing.M) {
 	testscript.Main(m, map[string]func(){
-		"mygrep": func() {
-			fmt.Println(strings.Join(os.Args[1:], " "))
-			time.Sleep(10 * time.Millisecond)
-		},
+		"mygrep": main,
 	})
 }
 

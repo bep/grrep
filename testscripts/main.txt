@@ -1,2 +1,23 @@
-mygrep 'This is a test.'
-stdout 'This is a test.'
+# Literal.
+mygrep BAR
+stdout './words.txt:3:BAR'
+
+# Regexp.
+mygrep 'BA[RZ]'
+stdout './words.txt:1:BAZ'
+stdout './words.txt:3:BAR'
+stdout './more/words.txt:1:BAR'
+
+! stdout 'FOO'
+! stdout 'BAN'
+! stdout 'Baz'
+
+-- words.txt --
+BAZ
+FOO
+BAR
+BAN
+Baz
+
+-- more/words.txt --
+BAR
