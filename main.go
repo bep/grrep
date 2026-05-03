@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -18,12 +19,13 @@ import (
 )
 
 const (
-	peekSize = 8000
+	peekSize      = 8000
+	readerBufSize = 1 << 20 // 1 MiB; covers any sane source line.
 )
 
 var readerPool = sync.Pool{
 	New: func() any {
-		return bufio.NewReader(nil)
+		return bufio.NewReaderSize(nil, readerBufSize)
 	},
 }
 
@@ -46,6 +48,7 @@ type grepper struct {
 	paths      chan string
 	results    chan []byte
 	numWorkers int
+	ignores    *ignoreSet // nil if --no-ignore
 }
 
 func run() (bool, error) {
@@ -54,7 +57,7 @@ func run() (bool, error) {
 		noIgnore bool
 	)
 	flag.BoolVar(&quiet, "q", false, "quiet: suppress match output")
-	flag.BoolVar(&noIgnore, "no-ignore", false, "do not respect ignore files (currently always on)")
+	flag.BoolVar(&noIgnore, "no-ignore", false, "do not respect .gitignore/.ignore files")
 	flag.Parse()
 
 	args := flag.Args()
@@ -78,6 +81,9 @@ func run() (bool, error) {
 		paths:      make(chan string, 256),
 		results:    make(chan []byte, 64),
 		numWorkers: max(runtime.NumCPU()/2, 2),
+	}
+	if !noIgnore {
+		g.ignores = newIgnoreSet(root)
 	}
 
 	eg.Go(g.walk)
@@ -125,6 +131,11 @@ func (g *grepper) walk() error {
 			if path != g.root && strings.HasPrefix(name, ".") {
 				return fs.SkipDir
 			}
+			if g.ignores != nil && path != g.root {
+				if rel, err := filepath.Rel(g.root, path); err == nil && g.ignores.match(rel, true) {
+					return fs.SkipDir
+				}
+			}
 			return nil
 		}
 		if strings.HasPrefix(name, ".") {
@@ -132,6 +143,11 @@ func (g *grepper) walk() error {
 		}
 		if !d.Type().IsRegular() {
 			return nil
+		}
+		if g.ignores != nil {
+			if rel, err := filepath.Rel(g.root, path); err == nil && g.ignores.match(rel, false) {
+				return nil
+			}
 		}
 		select {
 		case g.paths <- path:
