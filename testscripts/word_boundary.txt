@@ -1,0 +1,22 @@
+# -w match only at word boundaries
+mygrep -w foo
+stdout '^./words.txt:1:foo bar$'
+stdout '^./words.txt:4:hello foo!$'
+! stdout 'xfoo'
+! stdout 'foobar'
+
+# -w with -i
+mygrep -i -w Foo
+stdout '^./words.txt:1:foo bar$'
+stdout '^./words.txt:4:hello foo!$'
+stdout '^./words.txt:5:FOO baz$'
+! stdout 'xfoo'
+! stdout 'FOObar'
+
+-- words.txt --
+foo bar
+xfoo bar
+foobar
+hello foo!
+FOO baz
+FOObar

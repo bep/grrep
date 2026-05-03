@@ -53,6 +53,7 @@ type grepper struct {
 	m       *matcher
 	root    string
 	quiet   bool
+	invert  bool // -v: emit non-matching lines instead
 	ctx     context.Context
 	paths   chan string
 	results chan []byte
@@ -64,25 +65,29 @@ type grepper struct {
 
 func run() (bool, error) {
 	var (
-		quiet        bool
-		noIgnore     bool
-		fixedStrings bool
+		quiet           bool
+		noIgnore        bool
+		opts            matchOpts
+		invert          bool
 	)
 	flag.BoolVar(&quiet, "q", false, "quiet: suppress match output")
 	flag.BoolVar(&noIgnore, "no-ignore", false, "do not respect .gitignore/.ignore files")
-	flag.BoolVar(&fixedStrings, "F", false, "treat PATTERN as a fixed string, not a regex")
+	flag.BoolVar(&opts.fixedString, "F", false, "treat PATTERN as a fixed string, not a regex")
+	flag.BoolVar(&opts.caseInsensitive, "i", false, "case-insensitive match")
+	flag.BoolVar(&opts.wordBoundary, "w", false, "match only at word boundaries")
+	flag.BoolVar(&invert, "v", false, "select non-matching lines")
 	flag.Parse()
 
 	args := flag.Args()
 	if len(args) < 1 {
-		return false, fmt.Errorf("usage: mygrep [-q] [-F] [--no-ignore] PATTERN [PATH]")
+		return false, fmt.Errorf("usage: mygrep [-q] [-F] [-i] [-w] [-v] [--no-ignore] PATTERN [PATH]")
 	}
 	root := "."
 	if len(args) >= 2 {
 		root = args[1]
 	}
 
-	m, err := compileMatcher(args[0], fixedStrings)
+	m, err := compileMatcher(args[0], opts)
 	if err != nil {
 		return false, err
 	}
@@ -95,6 +100,7 @@ func run() (bool, error) {
 		m:                     m,
 		root:                  root,
 		quiet:                 quiet,
+		invert:                invert,
 		ctx:                   gCtx,
 		paths:                 make(chan string, 256),
 		results:               make(chan []byte, 64),
@@ -237,6 +243,11 @@ func (g *grepper) scanWholeBody(path string, data []byte) []byte {
 		return nil
 	}
 
+	// -v needs to look at every line; the bytes.Index fast path doesn't apply.
+	if g.invert {
+		return g.scanInverted(path, data)
+	}
+
 	// Pure-regex (no extracted literal): one FindAllIndex over the whole body.
 	if g.m.re != nil && len(g.m.literal) == 0 {
 		return g.scanWholeRegex(path, data)
@@ -316,6 +327,34 @@ func (g *grepper) scanWholeRegex(path string, data []byte) []byte {
 	return out.Bytes()
 }
 
+// scanInverted iterates every line and emits the ones that DON'T match.
+// Used for -v; we lose the bytes.Index fast path because a non-match
+// requires checking every line.
+func (g *grepper) scanInverted(path string, data []byte) []byte {
+	var out bytes.Buffer
+	lineNum := 1
+	start := 0
+	for start < len(data) {
+		end := len(data)
+		if i := bytes.IndexByte(data[start:], '\n'); i >= 0 {
+			end = start + i
+		}
+		line := data[start:end]
+		if !g.m.match(line) {
+			if g.quiet {
+				return []byte{}
+			}
+			fmt.Fprintf(&out, "%s:%d:%s\n", path, lineNum, line)
+		}
+		start = end + 1
+		lineNum++
+	}
+	if out.Len() == 0 {
+		return nil
+	}
+	return out.Bytes()
+}
+
 // scanFileStream is the existing bufio fallback used for files larger than
 // scanBufSize.
 func (g *grepper) scanFileStream(path string, f *os.File) []byte {
@@ -340,7 +379,8 @@ func (g *grepper) scanFileStream(path string, f *os.File) []byte {
 			if n := len(line); n > 0 && line[n-1] == '\n' {
 				line = line[:n-1]
 			}
-			if g.m.match(line) {
+			matched := g.m.match(line)
+			if matched != g.invert {
 				if g.quiet {
 					return []byte{}
 				}

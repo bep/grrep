@@ -1,0 +1,21 @@
+# -i case-insensitive
+mygrep -i foo
+stdout '^./words.txt:1:foo$'
+stdout '^./words.txt:2:Foo bar$'
+stdout '^./words.txt:3:FOOBAR$'
+stdout '^./words.txt:4:hello FOO!$'
+! stdout 'baz'
+
+# -i with regex
+mygrep -i 'F[oO]+'
+stdout '^./words.txt:1:foo$'
+stdout '^./words.txt:2:Foo bar$'
+stdout '^./words.txt:3:FOOBAR$'
+stdout '^./words.txt:4:hello FOO!$'
+
+-- words.txt --
+foo
+Foo bar
+FOOBAR
+hello FOO!
+baz

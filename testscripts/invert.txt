@@ -1,0 +1,38 @@
+# -v selects non-matching lines
+mygrep -v foo
+stdout '^./words.txt:2:bar$'
+stdout '^./words.txt:4:qux$'
+! stdout 'foo'
+! stdout 'foobar'
+
+# -v -i: case-insensitive invert
+mygrep -i -v foo
+stdout '^./words.txt:2:bar$'
+stdout '^./words.txt:4:qux$'
+! stdout 'Foo'
+! stdout 'FOO'
+
+# -v with no matching lines emits everything
+mygrep -v nope
+stdout '^./words.txt:1:foo$'
+stdout '^./words.txt:2:bar$'
+stdout '^./words.txt:3:Foobar$'
+stdout '^./words.txt:4:qux$'
+stdout '^./words.txt:5:FOO$'
+
+# -q -v exits 0 if any non-matching line exists
+mygrep -q -v foo
+
+# -q -v exits 1 if every line in a file matches the pattern
+! mygrep -q -v line everymatch.txt
+
+-- words.txt --
+foo
+bar
+Foobar
+qux
+FOO
+-- everymatch.txt --
+this line
+that line
+last line
