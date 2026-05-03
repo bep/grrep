@@ -11,7 +11,7 @@ import (
 func TestScripts(t *testing.T) {
 	setup := testSetupFunc()
 	testscript.Run(t, testscript.Params{
-		Dir: "testscripts",
+		Dir: "testscripts/main",
 		// UpdateScripts: true, // Uncomment to rewrite the test scripts with
 		// TestWork: true, // Uncomment to keep the test work dir.
 		Setup: func(env *testscript.Env) error {

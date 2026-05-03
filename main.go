@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/pprof"
 	"strings"
 	"sync"
 
@@ -49,6 +50,18 @@ func main() {
 	}
 }
 
+func writeProfile(name, path string) {
+	f, err := os.Create(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "create %s profile: %v\n", name, err)
+		return
+	}
+	defer f.Close()
+	if err := pprof.Lookup(name).WriteTo(f, 0); err != nil {
+		fmt.Fprintf(os.Stderr, "write %s profile: %v\n", name, err)
+	}
+}
+
 type grepper struct {
 	m       *matcher
 	root    string
@@ -65,10 +78,13 @@ type grepper struct {
 
 func run() (bool, error) {
 	var (
-		quiet           bool
-		noIgnore        bool
-		opts            matchOpts
-		invert          bool
+		quiet        bool
+		noIgnore     bool
+		opts         matchOpts
+		invert       bool
+		cpuProfile   string
+		memProfile   string
+		mutexProfile string
 	)
 	flag.BoolVar(&quiet, "q", false, "quiet: suppress match output")
 	flag.BoolVar(&noIgnore, "no-ignore", false, "do not respect .gitignore/.ignore files")
@@ -76,6 +92,10 @@ func run() (bool, error) {
 	flag.BoolVar(&opts.caseInsensitive, "i", false, "case-insensitive match")
 	flag.BoolVar(&opts.wordBoundary, "w", false, "match only at word boundaries")
 	flag.BoolVar(&invert, "v", false, "select non-matching lines")
+	// Hidden profiling flags (no usage description so flag -h leaves them blank).
+	flag.StringVar(&cpuProfile, "profile-cpu", "", "")
+	flag.StringVar(&memProfile, "profile-mem", "", "")
+	flag.StringVar(&mutexProfile, "profile-mutex", "", "")
 	flag.Parse()
 
 	args := flag.Args()
@@ -85,6 +105,36 @@ func run() (bool, error) {
 	root := "."
 	if len(args) >= 2 {
 		root = args[1]
+	}
+
+	if cpuProfile != "" {
+		f, err := os.Create(cpuProfile)
+		if err != nil {
+			return false, fmt.Errorf("create cpu profile: %w", err)
+		}
+		defer f.Close()
+		if err := pprof.StartCPUProfile(f); err != nil {
+			return false, fmt.Errorf("start cpu profile: %w", err)
+		}
+		defer pprof.StopCPUProfile()
+	}
+	if mutexProfile != "" {
+		runtime.SetMutexProfileFraction(1)
+		defer writeProfile("mutex", mutexProfile)
+	}
+	if memProfile != "" {
+		defer func() {
+			f, err := os.Create(memProfile)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "create mem profile: %v\n", err)
+				return
+			}
+			defer f.Close()
+			runtime.GC() // make in-use heap accurate
+			if err := pprof.WriteHeapProfile(f); err != nil {
+				fmt.Fprintf(os.Stderr, "write mem profile: %v\n", err)
+			}
+		}()
 	}
 
 	m, err := compileMatcher(args[0], opts)
@@ -157,8 +207,14 @@ func (g *grepper) walk() error {
 				return fs.SkipDir
 			}
 			if g.ignores != nil && path != g.root {
-				if rel, err := filepath.Rel(g.root, path); err == nil && g.ignores.match(rel, true) {
-					return fs.SkipDir
+				rel, err := filepath.Rel(g.root, path)
+				if err == nil {
+					if g.ignores.match(rel, true) {
+						return fs.SkipDir
+					}
+					// Eager-build this dir's ignoreNode now so that every
+					// child's match() call below is a cache hit, no recursion.
+					g.ignores.ensureNode(rel)
 				}
 			}
 			return nil
