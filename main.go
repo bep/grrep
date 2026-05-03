@@ -50,14 +50,16 @@ func main() {
 }
 
 type grepper struct {
-	m          *matcher
-	root       string
-	quiet      bool
-	ctx        context.Context
-	paths      chan string
-	results    chan []byte
-	numWorkers int
-	ignores    *ignoreSet // nil if --no-ignore
+	m       *matcher
+	root    string
+	quiet   bool
+	ctx     context.Context
+	paths   chan string
+	results chan []byte
+	ignores *ignoreSet // nil if --no-ignore
+
+	numWorkersDirWalker   int
+	numWorkersFileScanner int
 }
 
 func run() (bool, error) {
@@ -90,13 +92,14 @@ func run() (bool, error) {
 	eg, gCtx := errgroup.WithContext(ctx)
 
 	g := &grepper{
-		m:          m,
-		root:       root,
-		quiet:      quiet,
-		ctx:        gCtx,
-		paths:      make(chan string, 256),
-		results:    make(chan []byte, 64),
-		numWorkers: max(runtime.NumCPU()/2, 2),
+		m:                     m,
+		root:                  root,
+		quiet:                 quiet,
+		ctx:                   gCtx,
+		paths:                 make(chan string, 256),
+		results:               make(chan []byte, 64),
+		numWorkersDirWalker:   max(runtime.NumCPU()/2, 2),
+		numWorkersFileScanner: max(runtime.NumCPU()/3, 2),
 	}
 	if !noIgnore {
 		g.ignores = newIgnoreSet(root)
@@ -106,7 +109,7 @@ func run() (bool, error) {
 
 	eg.Go(func() error {
 		var wg sync.WaitGroup
-		for i := 0; i < g.numWorkers; i++ {
+		for i := 0; i < g.numWorkersFileScanner; i++ {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -134,7 +137,7 @@ func run() (bool, error) {
 
 func (g *grepper) walk() error {
 	defer close(g.paths)
-	cfg := &fastwalk.Config{NumWorkers: g.numWorkers}
+	cfg := &fastwalk.Config{NumWorkers: g.numWorkersDirWalker}
 	err := fastwalk.Walk(cfg, g.root, func(path string, d fs.DirEntry, err error) error {
 		if g.ctx.Err() != nil {
 			return fs.SkipAll

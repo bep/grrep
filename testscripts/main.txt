@@ -1,4 +1,2 @@
-# See https://pkg.go.dev/github.com/rogpeppe/go-internal/testscript
-
 mygrep 'This is a test.'
 stdout 'This is a test.'
