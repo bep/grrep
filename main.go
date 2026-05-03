@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -20,12 +21,20 @@ import (
 
 const (
 	peekSize      = 8000
-	readerBufSize = 1 << 20 // 1 MiB; covers any sane source line.
+	readerBufSize = 1 << 20 // 1 MiB; bufio fallback for files exceeding scanBufSize.
+	scanBufSize   = 1 << 20 // 1 MiB; whole-file pool buffer.
 )
 
 var readerPool = sync.Pool{
 	New: func() any {
 		return bufio.NewReaderSize(nil, readerBufSize)
+	},
+}
+
+var bufPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, scanBufSize)
+		return &b
 	},
 }
 
@@ -188,6 +197,125 @@ func (g *grepper) scanFile(path string) []byte {
 	}
 	defer f.Close()
 
+	bufp := bufPool.Get().(*[]byte)
+	defer bufPool.Put(bufp)
+	buf := *bufp
+
+	n, err := io.ReadFull(f, buf)
+	switch {
+	case errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF):
+		// File fit in the buffer (possibly empty).
+		return g.scanWholeBody(path, buf[:n])
+	case err == nil:
+		// Buffer filled exactly; probe for extra bytes.
+		var probe [1]byte
+		if m, _ := f.Read(probe[:]); m == 0 {
+			// File was exactly scanBufSize.
+			return g.scanWholeBody(path, buf)
+		}
+		// File is larger than the pool buffer; rewind and stream.
+		if _, e := f.Seek(0, io.SeekStart); e != nil {
+			return nil
+		}
+		return g.scanFileStream(path, f)
+	default:
+		return nil
+	}
+}
+
+// scanWholeBody finds matches by sliding bytes.Index over data. Cheap when a
+// file has no matches at all — one bytes.Index call returns -1 and we're done.
+func (g *grepper) scanWholeBody(path string, data []byte) []byte {
+	headLimit := len(data)
+	if headLimit > peekSize {
+		headLimit = peekSize
+	}
+	if bytes.IndexByte(data[:headLimit], 0) >= 0 {
+		return nil
+	}
+
+	// Pure-regex (no extracted literal): one FindAllIndex over the whole body.
+	if g.m.re != nil && len(g.m.literal) == 0 {
+		return g.scanWholeRegex(path, data)
+	}
+
+	// Literal or literal pre-filter: slide bytes.Index, validate with re if present.
+	lit := g.m.literal
+	var out bytes.Buffer
+	lineNum := 1
+	cursor := 0
+	for {
+		idx := bytes.Index(data[cursor:], lit)
+		if idx < 0 {
+			break
+		}
+		matchPos := cursor + idx
+		lineNum += bytes.Count(data[cursor:matchPos], []byte{'\n'})
+		lineStart := 0
+		if i := bytes.LastIndexByte(data[:matchPos], '\n'); i >= 0 {
+			lineStart = i + 1
+		}
+		lineEnd := len(data)
+		if i := bytes.IndexByte(data[matchPos:], '\n'); i >= 0 {
+			lineEnd = matchPos + i
+		}
+		line := data[lineStart:lineEnd]
+		if g.m.re == nil || g.m.re.Match(line) {
+			if g.quiet {
+				return []byte{}
+			}
+			fmt.Fprintf(&out, "%s:%d:%s\n", path, lineNum, line)
+		}
+		// Advance past this line so we don't re-match on it.
+		cursor = lineEnd
+		if cursor < len(data) {
+			cursor++ // skip the '\n'
+			lineNum++
+		}
+	}
+	if out.Len() == 0 {
+		return nil
+	}
+	return out.Bytes()
+}
+
+func (g *grepper) scanWholeRegex(path string, data []byte) []byte {
+	hits := g.m.re.FindAllIndex(data, -1)
+	if len(hits) == 0 {
+		return nil
+	}
+	if g.quiet {
+		return []byte{}
+	}
+	var out bytes.Buffer
+	lineNum := 1
+	cursor := 0
+	prevLineEnd := -1
+	for _, h := range hits {
+		matchPos := h[0]
+		lineNum += bytes.Count(data[cursor:matchPos], []byte{'\n'})
+		lineStart := 0
+		if i := bytes.LastIndexByte(data[:matchPos], '\n'); i >= 0 {
+			lineStart = i + 1
+		}
+		lineEnd := len(data)
+		if i := bytes.IndexByte(data[matchPos:], '\n'); i >= 0 {
+			lineEnd = matchPos + i
+		}
+		// Multiple regex hits can land on the same line — emit the line once.
+		if lineEnd != prevLineEnd {
+			line := data[lineStart:lineEnd]
+			fmt.Fprintf(&out, "%s:%d:%s\n", path, lineNum, line)
+			prevLineEnd = lineEnd
+		}
+		cursor = matchPos
+	}
+	return out.Bytes()
+}
+
+// scanFileStream is the existing bufio fallback used for files larger than
+// scanBufSize.
+func (g *grepper) scanFileStream(path string, f *os.File) []byte {
 	br := readerPool.Get().(*bufio.Reader)
 	defer readerPool.Put(br)
 	br.Reset(f)
