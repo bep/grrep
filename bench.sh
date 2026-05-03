@@ -1,6 +1,7 @@
 #!/bin/bash
 
-PATTERN=_SUSPEND
+LITERAL=_SUSPEND
+REGEX='[A-Z]+_SUSPEND'
 ROOT=/Users/bep/dev/dump/linux
 N=${N:-5}
 
@@ -27,7 +28,14 @@ bench() {
 
 echo "n=$N iterations per variant"
 
-bench 'ripgrep	quiet:' rg -q "$PATTERN" "$ROOT"
-bench 'ripgrep	full: ' rg "$PATTERN" "$ROOT"
-bench 'mygrep	quiet:' /tmp/mygrep -q "$PATTERN" "$ROOT"
-bench 'mygrep	full: ' /tmp/mygrep "$PATTERN" "$ROOT"
+echo "--- literal: $LITERAL ---"
+bench 'ripgrep	quiet:' rg -q "$LITERAL" "$ROOT"
+bench 'ripgrep	full: ' rg "$LITERAL" "$ROOT"
+bench 'mygrep	quiet:' /tmp/mygrep -q "$LITERAL" "$ROOT"
+bench 'mygrep	full: ' /tmp/mygrep "$LITERAL" "$ROOT"
+
+echo "--- regex:   $REGEX ---"
+bench 'ripgrep	quiet:' rg -q "$REGEX" "$ROOT"
+bench 'ripgrep	full: ' rg "$REGEX" "$ROOT"
+bench 'mygrep	quiet:' /tmp/mygrep -q "$REGEX" "$ROOT"
+bench 'mygrep	full: ' /tmp/mygrep "$REGEX" "$ROOT"

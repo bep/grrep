@@ -41,7 +41,7 @@ func main() {
 }
 
 type grepper struct {
-	pattern    []byte
+	m          *matcher
 	root       string
 	quiet      bool
 	ctx        context.Context
@@ -53,20 +53,27 @@ type grepper struct {
 
 func run() (bool, error) {
 	var (
-		quiet    bool
-		noIgnore bool
+		quiet        bool
+		noIgnore     bool
+		fixedStrings bool
 	)
 	flag.BoolVar(&quiet, "q", false, "quiet: suppress match output")
 	flag.BoolVar(&noIgnore, "no-ignore", false, "do not respect .gitignore/.ignore files")
+	flag.BoolVar(&fixedStrings, "F", false, "treat PATTERN as a fixed string, not a regex")
 	flag.Parse()
 
 	args := flag.Args()
 	if len(args) < 1 {
-		return false, fmt.Errorf("usage: mygrep [-q] [--no-ignore] PATTERN [PATH]")
+		return false, fmt.Errorf("usage: mygrep [-q] [-F] [--no-ignore] PATTERN [PATH]")
 	}
 	root := "."
 	if len(args) >= 2 {
 		root = args[1]
+	}
+
+	m, err := compileMatcher(args[0], fixedStrings)
+	if err != nil {
+		return false, err
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -74,7 +81,7 @@ func run() (bool, error) {
 	eg, gCtx := errgroup.WithContext(ctx)
 
 	g := &grepper{
-		pattern:    []byte(args[0]),
+		m:          m,
 		root:       root,
 		quiet:      quiet,
 		ctx:        gCtx,
@@ -202,7 +209,7 @@ func (g *grepper) scanFile(path string) []byte {
 			if n := len(line); n > 0 && line[n-1] == '\n' {
 				line = line[:n-1]
 			}
-			if bytes.Contains(line, g.pattern) {
+			if g.m.match(line) {
 				if g.quiet {
 					return []byte{}
 				}
