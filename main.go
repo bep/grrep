@@ -54,6 +54,16 @@ func main() {
 	}
 }
 
+// trimCR strips a trailing carriage return from line. Combined with the
+// per-scan-path \n stripping, this normalizes both LF and CRLF line endings
+// so output and regex matches don't see a stray \r at the end.
+func trimCR(line []byte) []byte {
+	if n := len(line); n > 0 && line[n-1] == '\r' {
+		return line[:n-1]
+	}
+	return line
+}
+
 func writeProfile(name, path string) {
 	f, err := os.Create(path)
 	if err != nil {
@@ -266,6 +276,11 @@ func (g *grepper) scanFile(path string) []byte {
 	}
 	defer f.Close()
 
+	// Output paths are slash-separated regardless of host OS, so cross-platform
+	// consumers (and tests) see consistent paths. Native `path` is still used
+	// for the os.Open above; this normalization only affects emission.
+	displayPath := filepath.ToSlash(path)
+
 	bufp := bufPool.Get().(*[]byte)
 	defer bufPool.Put(bufp)
 	buf := *bufp
@@ -274,19 +289,19 @@ func (g *grepper) scanFile(path string) []byte {
 	switch {
 	case errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF):
 		// File fit in the buffer (possibly empty).
-		return g.scanWholeBody(path, buf[:n])
+		return g.scanWholeBody(displayPath, buf[:n])
 	case err == nil:
 		// Buffer filled exactly; probe for extra bytes.
 		var probe [1]byte
 		if m, _ := f.Read(probe[:]); m == 0 {
 			// File was exactly scanBufSize.
-			return g.scanWholeBody(path, buf)
+			return g.scanWholeBody(displayPath, buf)
 		}
 		// File is larger than the pool buffer; rewind and stream.
 		if _, e := f.Seek(0, io.SeekStart); e != nil {
 			return nil
 		}
-		return g.scanFileStream(path, f)
+		return g.scanFileStream(displayPath, f)
 	default:
 		return nil
 	}
@@ -333,7 +348,7 @@ func (g *grepper) scanWholeBody(path string, data []byte) []byte {
 		if i := bytes.IndexByte(data[matchPos:], '\n'); i >= 0 {
 			lineEnd = matchPos + i
 		}
-		line := data[lineStart:lineEnd]
+		line := trimCR(data[lineStart:lineEnd])
 		if g.m.Re == nil || g.m.Re.Match(line) {
 			if g.quiet {
 				return []byte{}
@@ -378,7 +393,7 @@ func (g *grepper) scanWholeRegex(path string, data []byte) []byte {
 		}
 		// Multiple regex hits can land on the same line — emit the line once.
 		if lineEnd != prevLineEnd {
-			line := data[lineStart:lineEnd]
+			line := trimCR(data[lineStart:lineEnd])
 			fmt.Fprintf(&out, "%s:%d:%s\n", path, lineNum, line)
 			prevLineEnd = lineEnd
 		}
@@ -399,7 +414,7 @@ func (g *grepper) scanInverted(path string, data []byte) []byte {
 		if i := bytes.IndexByte(data[start:], '\n'); i >= 0 {
 			end = start + i
 		}
-		line := data[start:end]
+		line := trimCR(data[start:end])
 		if !g.m.Match(line) {
 			if g.quiet {
 				return []byte{}
@@ -439,6 +454,7 @@ func (g *grepper) scanFileStream(path string, f *os.File) []byte {
 			if n := len(line); n > 0 && line[n-1] == '\n' {
 				line = line[:n-1]
 			}
+			line = trimCR(line)
 			matched := g.m.Match(line)
 			if matched != g.invert {
 				if g.quiet {
