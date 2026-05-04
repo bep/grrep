@@ -21,19 +21,27 @@ type ignoreSet struct {
 }
 
 type ignoreNode struct {
+	parent      *ignoreNode         // ancestor; used by match() to walk up in O(depth)
 	ownPatterns []gitignore.Pattern // patterns from this dir's .gitignore + .ignore
+	// ownDirOnly[i] is true when ownPatterns[i]'s source line ended with `/`,
+	// i.e. it can only match directories. We skip those when matching files.
+	ownDirOnly []bool
 }
 
 func newIgnoreSet(root string) *ignoreSet {
 	s := &ignoreSet{root: root}
+	patterns, dirOnly := readDirPatterns(root, nil)
 	s.cache.Store("", &ignoreNode{
-		ownPatterns: readDirPatterns(root, nil),
+		ownPatterns: patterns,
+		ownDirOnly:  dirOnly,
 	})
 	return s
 }
 
 // ensureNode reads relDir's .gitignore/.ignore and caches the patterns there.
-// Idempotent. The walker calls this for every directory it visits.
+// Idempotent. The walker calls this for every directory it visits, and
+// because fastwalk visits parents before children, the parent's node is
+// always already in the cache by the time we get here.
 func (s *ignoreSet) ensureNode(relDir string) {
 	if relDir == "." || relDir == "" {
 		return
@@ -41,51 +49,61 @@ func (s *ignoreSet) ensureNode(relDir string) {
 	if _, ok := s.cache.Load(relDir); ok {
 		return
 	}
+	parentRel := filepath.Dir(relDir)
+	if parentRel == "." || parentRel == relDir {
+		parentRel = ""
+	}
+	parentVal, _ := s.cache.Load(parentRel)
+	parent, _ := parentVal.(*ignoreNode) // nil-safe: zero value is fine if missing
 	domain := strings.Split(filepath.ToSlash(relDir), "/")
+	patterns, dirOnly := readDirPatterns(filepath.Join(s.root, relDir), domain)
 	s.cache.LoadOrStore(relDir, &ignoreNode{
-		ownPatterns: readDirPatterns(filepath.Join(s.root, relDir), domain),
+		parent:      parent,
+		ownPatterns: patterns,
+		ownDirOnly:  dirOnly,
 	})
 }
 
-// match reports whether rel (relative to root) is ignored. Walks from rel's
-// parent directory up to the root, consulting each level's patterns in
-// reverse order. Returns at the first non-NoMatch result, which is also the
-// deepest-matching one.
+// match reports whether rel (relative to root) is ignored. Looks up rel's
+// parent directory once, then walks up via the node parent pointer chain,
+// consulting each level's patterns in reverse order. Returns at the first
+// non-NoMatch result, which is also the deepest-matching one.
 func (s *ignoreSet) match(rel string, isDir bool) bool {
 	if rel == "" || rel == "." {
 		return false
 	}
 	parts := strings.Split(filepath.ToSlash(rel), "/")
-
-	cur := filepath.Dir(rel)
-	if cur == "." || cur == rel {
-		cur = ""
+	parentRel := filepath.Dir(rel)
+	if parentRel == "." || parentRel == rel {
+		parentRel = ""
 	}
-	for {
-		if v, ok := s.cache.Load(cur); ok {
-			n := v.(*ignoreNode)
-			for i := len(n.ownPatterns) - 1; i >= 0; i-- {
-				if r := n.ownPatterns[i].Match(parts, isDir); r != gitignore.NoMatch {
-					return r == gitignore.Exclude
-				}
+	v, ok := s.cache.Load(parentRel)
+	if !ok {
+		return false
+	}
+	for n := v.(*ignoreNode); n != nil; n = n.parent {
+		for i := len(n.ownPatterns) - 1; i >= 0; i-- {
+			if !isDir && n.ownDirOnly[i] {
+				continue // dir-only pattern can never match a file
+			}
+			if r := n.ownPatterns[i].Match(parts, isDir); r != gitignore.NoMatch {
+				return r == gitignore.Exclude
 			}
 		}
-		if cur == "" {
-			return false
-		}
-		next := filepath.Dir(cur)
-		if next == "." || next == cur {
-			next = ""
-		}
-		cur = next
 	}
+	return false
 }
 
 // readDirPatterns reads .gitignore and .ignore from absDir, parses each non-empty,
-// non-comment line as a gitignore.Pattern with the given domain, and returns them.
-// Lines between "# Managed by gitjoin" markers are skipped.
-func readDirPatterns(absDir string, domain []string) []gitignore.Pattern {
-	var patterns []gitignore.Pattern
+// non-comment line as a gitignore.Pattern with the given domain, and returns the
+// parallel slices (patterns, dir-only flags). Lines between
+// "# Managed by gitjoin" markers are skipped. A pattern is dir-only when its
+// source line ends with `/`.
+func readDirPatterns(absDir string, domain []string) ([]gitignore.Pattern, []bool) {
+	var (
+		patterns []gitignore.Pattern
+		dirOnly  []bool
+	)
 	for _, name := range []string{".gitignore", ".ignore"} {
 		f, err := os.Open(filepath.Join(absDir, name))
 		if err != nil {
@@ -111,8 +129,9 @@ func readDirPatterns(absDir string, domain []string) []gitignore.Pattern {
 				continue
 			}
 			patterns = append(patterns, gitignore.ParsePattern(trimmed, domain))
+			dirOnly = append(dirOnly, strings.HasSuffix(trimmed, "/"))
 		}
 		f.Close()
 	}
-	return patterns
+	return patterns, dirOnly
 }

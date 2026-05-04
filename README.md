@@ -4,7 +4,9 @@
 
 Note that my only intention with these benchmarks is to get a rough idea of how this tool performs compared to some others, and maybe show that you can get decent performance out of a relatively simple Go implementation. Note that the benchmarks below are run on a MacBook Pro M1 with 32 GB of RAM. I have read somewhere that `ripgrep` is highly optimized on x64 architectures, which may help explain that number.
 
-On Macos:
+### Run benchmarks on MacOS
+
+Prepare test data:
 
 ```
 diskutil list                                                 # find your APFS container (likely disk3)
@@ -23,3 +25,5 @@ docker run --rm \
    make defconfig && make -j8
  '
 ```
+
+Then run `bench.sh`.

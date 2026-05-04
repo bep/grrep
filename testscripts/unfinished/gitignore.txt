@@ -1,0 +1,21 @@
+
+mygrep OK
+stdout './f1.txt:1:OK'
+! mygrep FAIL
+-- f1.txt --
+OK
+-- ignoreme/f2.txt --
+FAIL1
+-- ignoreme/f3.txt --
+FAIL2
+-- .gitignore --
+ignoreme/
+ignoremetoo1/
+ignoremetoo2/
+ignoremetoo3/
+-- d1/.gitignore --
+ignoremetoo3/
+-- d1/ignoremetoo3/f4.txt --
+FAIL3
+-- d1/f5.txt --
+OK
