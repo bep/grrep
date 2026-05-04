@@ -2,136 +2,101 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 
-	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
+	gitignore "github.com/git-pkgs/gitignore"
 )
 
-// ignoreSet caches per-directory gitignore patterns for a single search root.
-// The walker populates the cache for each directory it visits via ensureNode;
-// match() walks up from a path's parent directory to the root, applying each
-// level's patterns to implement gitignore semantics (the deepest-matching
-// pattern wins; within a level, the last pattern wins).
+// ignoreSet wraps a single global git-pkgs/gitignore matcher with an RWMutex.
+// The walker calls ensureNode for every directory it visits, which appends
+// that directory's .gitignore/.ignore patterns to the matcher (with the dir's
+// relative path as their scope). match() does a read-locked lookup.
 type ignoreSet struct {
-	root  string
-	cache sync.Map // string (rel dir, "" for root) -> *ignoreNode
-}
-
-type ignoreNode struct {
-	parent      *ignoreNode         // ancestor; used by match() to walk up in O(depth)
-	ownPatterns []gitignore.Pattern // patterns from this dir's .gitignore + .ignore
-	// ownDirOnly[i] is true when ownPatterns[i]'s source line ended with `/`,
-	// i.e. it can only match directories. We skip those when matching files.
-	ownDirOnly []bool
+	root    string
+	mu      sync.RWMutex
+	matcher *gitignore.Matcher
+	seen    sync.Map // string (rel dir) -> struct{} ; ensures each dir is loaded once
 }
 
 func newIgnoreSet(root string) *ignoreSet {
-	s := &ignoreSet{root: root}
-	patterns, dirOnly := readDirPatterns(root, nil)
-	s.cache.Store("", &ignoreNode{
-		ownPatterns: patterns,
-		ownDirOnly:  dirOnly,
-	})
+	s := &ignoreSet{
+		root:    root,
+		matcher: gitignore.New(""),
+	}
+	s.loadDir(root, "")
+	s.seen.Store("", struct{}{})
 	return s
 }
 
-// ensureNode reads relDir's .gitignore/.ignore and caches the patterns there.
-// Idempotent. The walker calls this for every directory it visits, and
-// because fastwalk visits parents before children, the parent's node is
-// always already in the cache by the time we get here.
+// ensureNode loads relDir's .gitignore/.ignore (if any) into the global
+// matcher. Idempotent. The walker calls this for every directory it visits.
 func (s *ignoreSet) ensureNode(relDir string) {
 	if relDir == "." || relDir == "" {
 		return
 	}
-	if _, ok := s.cache.Load(relDir); ok {
+	if _, ok := s.seen.Load(relDir); ok {
 		return
 	}
-	parentRel := filepath.Dir(relDir)
-	if parentRel == "." || parentRel == relDir {
-		parentRel = ""
+	if _, loaded := s.seen.LoadOrStore(relDir, struct{}{}); loaded {
+		return
 	}
-	parentVal, _ := s.cache.Load(parentRel)
-	parent, _ := parentVal.(*ignoreNode) // nil-safe: zero value is fine if missing
-	domain := strings.Split(filepath.ToSlash(relDir), "/")
-	patterns, dirOnly := readDirPatterns(filepath.Join(s.root, relDir), domain)
-	s.cache.LoadOrStore(relDir, &ignoreNode{
-		parent:      parent,
-		ownPatterns: patterns,
-		ownDirOnly:  dirOnly,
-	})
+	s.loadDir(filepath.Join(s.root, relDir), relDir)
 }
 
-// match reports whether rel (relative to root) is ignored. Looks up rel's
-// parent directory once, then walks up via the node parent pointer chain,
-// consulting each level's patterns in reverse order. Returns at the first
-// non-NoMatch result, which is also the deepest-matching one.
+func (s *ignoreSet) loadDir(absDir, relDir string) {
+	for _, name := range []string{".gitignore", ".ignore"} {
+		data, err := os.ReadFile(filepath.Join(absDir, name))
+		if err != nil {
+			continue
+		}
+		data = stripGitjoinSection(data)
+		if len(bytes.TrimSpace(data)) == 0 {
+			continue
+		}
+		s.mu.Lock()
+		s.matcher.AddPatterns(data, relDir)
+		s.mu.Unlock()
+	}
+}
+
+// match reports whether rel (relative to root, OS-native separators) is ignored.
 func (s *ignoreSet) match(rel string, isDir bool) bool {
 	if rel == "" || rel == "." {
 		return false
 	}
-	parts := strings.Split(filepath.ToSlash(rel), "/")
-	parentRel := filepath.Dir(rel)
-	if parentRel == "." || parentRel == rel {
-		parentRel = ""
-	}
-	v, ok := s.cache.Load(parentRel)
-	if !ok {
-		return false
-	}
-	for n := v.(*ignoreNode); n != nil; n = n.parent {
-		for i := len(n.ownPatterns) - 1; i >= 0; i-- {
-			if !isDir && n.ownDirOnly[i] {
-				continue // dir-only pattern can never match a file
-			}
-			if r := n.ownPatterns[i].Match(parts, isDir); r != gitignore.NoMatch {
-				return r == gitignore.Exclude
-			}
-		}
-	}
-	return false
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.matcher.MatchPath(filepath.ToSlash(rel), isDir)
 }
 
-// readDirPatterns reads .gitignore and .ignore from absDir, parses each non-empty,
-// non-comment line as a gitignore.Pattern with the given domain, and returns the
-// parallel slices (patterns, dir-only flags). Lines between
-// "# Managed by gitjoin" markers are skipped. A pattern is dir-only when its
-// source line ends with `/`.
-func readDirPatterns(absDir string, domain []string) ([]gitignore.Pattern, []bool) {
-	var (
-		patterns []gitignore.Pattern
-		dirOnly  []bool
-	)
-	for _, name := range []string{".gitignore", ".ignore"} {
-		f, err := os.Open(filepath.Join(absDir, name))
-		if err != nil {
+// stripGitjoinSection removes any lines between
+// "# Managed by gitjoin - do not edit this section" and
+// "# End gitjoin managed section" so that gitjoin-managed entries (which point
+// at subrepos the user wants searched) are NOT treated as ignore rules.
+func stripGitjoinSection(data []byte) []byte {
+	var out bytes.Buffer
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	in := false
+	for scanner.Scan() {
+		line := scanner.Text()
+		if strings.Contains(line, "Managed by gitjoin") {
+			in = true
 			continue
 		}
-		scanner := bufio.NewScanner(f)
-		inGitjoin := false
-		for scanner.Scan() {
-			line := scanner.Text()
-			if strings.Contains(line, "Managed by gitjoin") {
-				inGitjoin = true
-				continue
-			}
-			if strings.Contains(line, "End gitjoin managed section") {
-				inGitjoin = false
-				continue
-			}
-			if inGitjoin {
-				continue
-			}
-			trimmed := strings.TrimSpace(line)
-			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-				continue
-			}
-			patterns = append(patterns, gitignore.ParsePattern(trimmed, domain))
-			dirOnly = append(dirOnly, strings.HasSuffix(trimmed, "/"))
+		if strings.Contains(line, "End gitjoin managed section") {
+			in = false
+			continue
 		}
-		f.Close()
+		if in {
+			continue
+		}
+		out.WriteString(line)
+		out.WriteByte('\n')
 	}
-	return patterns, dirOnly
+	return out.Bytes()
 }
