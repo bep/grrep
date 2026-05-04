@@ -1,29 +1,63 @@
+# mygrep
 
+A small recursive grep written in Go.
 
-## Benchmark info
+## Why
 
-Note that my only intention with these benchmarks is to get a rough idea of how this tool performs compared to some others, and maybe show that you can get decent performance out of a relatively simple Go implementation. Note that the benchmarks below are run on a MacBook Pro M1 with 32 GB of RAM. I have read somewhere that `ripgrep` is highly optimized on x64 architectures, which may help explain that number.
+I needed a search tool that plays nicely with [gitjoin](https://github.com/bep/gitjoin) — the joined-in subrepositories are listed as `.gitignore` entries in the host repo, and a normal grep would refuse to descend into them. mygrep skips the gitjoin-managed block when reading `.gitignore`, so the joined repos remain searchable as one tree.
 
-### Run benchmarks on MacOS
+The other motivation was curiosity: how far Go and the standard library can take a tool like this before reaching for non-stdlib regex/SIMD or unsafe code.
 
-Prepare test data:
+## Behavior
 
-```
-diskutil list                                                 # find your APFS container (likely disk3)
+* Honors `.gitignore` and `.ignore` files in the search tree.
+* Does **not** honor `~/.gitignore_global`.
+* Skips the `# Managed by gitjoin … # End gitjoin managed section` block when reading any `.gitignore`.
+* Skips hidden files and directories.
+* Skips files whose first 8 KiB contain a NUL byte (binary heuristic).
+
+## Benchmark
+
+Similar shape to the first table in [ripgrep's "Quick examples comparing tools"](https://github.com/burntsushi/ripgrep#quick-examples-comparing-tools), on a MacBook Pro M1 (32 GB) against [the current torvalds/linux](https://github.com/torvalds/linux) after `make defconfig && make -j8`.
+
+Tree:
+
+| metric | count |
+|---|---|
+| files (excluding hidden) | 118,270 |
+| files visible after `.gitignore` | 93,593 |
+| files filtered by `.gitignore` | 24,677 |
+
+Pattern: `[A-Z]+_SUSPEND` matched as a whole word (`-w`). All three tools find the same 575 matches.
+
+| tool | median wall (n=7) |
+|---|---|
+| ugrep | 1.184s |
+| mygrep | 1.664s |
+| rg | 3.467s |
+
+Reproduce with `bash bench.sh`.
+
+## Setting up the benchmark tree on macOS
+
+The Linux source contains paths that collide on a case-insensitive filesystem (e.g. `Documentation/Kbuild` and `Documentation/kbuild/`). Clone into a case-sensitive volume, then build inside a Linux container:
+
+```sh
+diskutil list                                                # find the APFS container (often disk3)
 diskutil apfs addVolume disk3 'Case-sensitive APFS' LinuxBench
 cd /Volumes/LinuxBench
 git clone --depth=1 https://github.com/torvalds/linux.git
 
 docker run --rm \
- -v /Volumes/LinuxBench/linux:/src -w /src \
- ubuntu:24.04 \
- bash -c '
-   apt-get update -qq
+  -v /Volumes/LinuxBench/linux:/src -w /src \
+  ubuntu:24.04 \
+  bash -c '
+    apt-get update -qq
     DEBIAN_FRONTEND=noninteractive apt-get install -yqq --no-install-recommends \
-    build-essential bc bison flex libssl-dev libelf-dev cpio kmod \
-    python3 rsync dwarves
-   make defconfig && make -j8
- '
+      build-essential bc bison flex libssl-dev libelf-dev cpio kmod \
+      python3 rsync dwarves
+    make defconfig && make -j8
+  '
 ```
 
-Then run `bench.sh`.
+The build creates the ~25 K `.o` / `.cmd` / etc. artifacts that make the `.gitignore` path matter.

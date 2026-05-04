@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/bep/mygrep/internal"
 	"github.com/charlievieth/fastwalk"
 	"golang.org/x/sync/errgroup"
 )
@@ -63,14 +64,14 @@ func writeProfile(name, path string) {
 }
 
 type grepper struct {
-	m       *matcher
+	m       *internal.Matcher
 	root    string
 	quiet   bool
 	invert  bool // -v: emit non-matching lines instead
 	ctx     context.Context
 	paths   chan string
 	results chan []byte
-	ignores *ignoreSet // nil if --no-ignore
+	ignores *internal.IgnoreSet // nil if --no-ignore
 
 	numWorkersDirWalker   int
 	numWorkersFileScanner int
@@ -80,7 +81,7 @@ func run() (bool, error) {
 	var (
 		quiet        bool
 		noIgnore     bool
-		opts         matchOpts
+		opts         internal.MatchOpts
 		invert       bool
 		cpuProfile   string
 		memProfile   string
@@ -88,9 +89,9 @@ func run() (bool, error) {
 	)
 	flag.BoolVar(&quiet, "q", false, "quiet: suppress match output")
 	flag.BoolVar(&noIgnore, "no-ignore", false, "do not respect .gitignore/.ignore files")
-	flag.BoolVar(&opts.fixedString, "F", false, "treat PATTERN as a fixed string, not a regex")
-	flag.BoolVar(&opts.caseInsensitive, "i", false, "case-insensitive match")
-	flag.BoolVar(&opts.wordBoundary, "w", false, "match only at word boundaries")
+	flag.BoolVar(&opts.FixedString, "F", false, "treat PATTERN as a fixed string, not a regex")
+	flag.BoolVar(&opts.CaseInsensitive, "i", false, "case-insensitive match")
+	flag.BoolVar(&opts.WordBoundary, "w", false, "match only at word boundaries")
 	flag.BoolVar(&invert, "v", false, "select non-matching lines")
 	// Hidden profiling flags (no usage description so flag -h leaves them blank).
 	flag.StringVar(&cpuProfile, "profile-cpu", "", "")
@@ -137,7 +138,7 @@ func run() (bool, error) {
 		}()
 	}
 
-	m, err := compileMatcher(args[0], opts)
+	m, err := internal.CompileMatcher(args[0], opts)
 	if err != nil {
 		return false, err
 	}
@@ -158,7 +159,7 @@ func run() (bool, error) {
 		numWorkersFileScanner: max(runtime.NumCPU()/3, 2),
 	}
 	if !noIgnore {
-		g.ignores = newIgnoreSet(root)
+		g.ignores = internal.NewIgnoreSet(root)
 	}
 
 	eg.Go(g.walk)
@@ -209,12 +210,12 @@ func (g *grepper) walk() error {
 			if g.ignores != nil && path != g.root {
 				rel, err := filepath.Rel(g.root, path)
 				if err == nil {
-					if g.ignores.match(rel, true) {
+					if g.ignores.Match(rel, true) {
 						return fs.SkipDir
 					}
 					// Eager-build this dir's ignoreNode now so that every
 					// child's match() call below is a cache hit, no recursion.
-					g.ignores.ensureNode(rel)
+					g.ignores.EnsureNode(rel)
 				}
 			}
 			return nil
@@ -226,7 +227,7 @@ func (g *grepper) walk() error {
 			return nil
 		}
 		if g.ignores != nil {
-			if rel, err := filepath.Rel(g.root, path); err == nil && g.ignores.match(rel, false) {
+			if rel, err := filepath.Rel(g.root, path); err == nil && g.ignores.Match(rel, false) {
 				return nil
 			}
 		}
@@ -305,12 +306,12 @@ func (g *grepper) scanWholeBody(path string, data []byte) []byte {
 	}
 
 	// Pure-regex (no extracted literal): one FindAllIndex over the whole body.
-	if g.m.re != nil && len(g.m.literal) == 0 {
+	if g.m.Re != nil && len(g.m.Literal) == 0 {
 		return g.scanWholeRegex(path, data)
 	}
 
 	// Literal or literal pre-filter: slide bytes.Index, validate with re if present.
-	lit := g.m.literal
+	lit := g.m.Literal
 	var out bytes.Buffer
 	lineNum := 1
 	cursor := 0
@@ -330,7 +331,7 @@ func (g *grepper) scanWholeBody(path string, data []byte) []byte {
 			lineEnd = matchPos + i
 		}
 		line := data[lineStart:lineEnd]
-		if g.m.re == nil || g.m.re.Match(line) {
+		if g.m.Re == nil || g.m.Re.Match(line) {
 			if g.quiet {
 				return []byte{}
 			}
@@ -350,7 +351,7 @@ func (g *grepper) scanWholeBody(path string, data []byte) []byte {
 }
 
 func (g *grepper) scanWholeRegex(path string, data []byte) []byte {
-	hits := g.m.re.FindAllIndex(data, -1)
+	hits := g.m.Re.FindAllIndex(data, -1)
 	if len(hits) == 0 {
 		return nil
 	}
@@ -396,7 +397,7 @@ func (g *grepper) scanInverted(path string, data []byte) []byte {
 			end = start + i
 		}
 		line := data[start:end]
-		if !g.m.match(line) {
+		if !g.m.Match(line) {
 			if g.quiet {
 				return []byte{}
 			}
@@ -435,7 +436,7 @@ func (g *grepper) scanFileStream(path string, f *os.File) []byte {
 			if n := len(line); n > 0 && line[n-1] == '\n' {
 				line = line[:n-1]
 			}
-			matched := g.m.match(line)
+			matched := g.m.Match(line)
 			if matched != g.invert {
 				if g.quiet {
 					return []byte{}

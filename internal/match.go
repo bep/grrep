@@ -1,4 +1,4 @@
-package main
+package internal
 
 import (
 	"bytes"
@@ -7,50 +7,50 @@ import (
 	"regexp/syntax"
 )
 
-// matcher decides whether a line matches the user's pattern. It supports three
+// Matcher decides whether a line matches the user's pattern. It supports three
 // regimes: pure fixed-string (re == nil), regex with a literal pre-filter, and
 // regex without one.
-type matcher struct {
-	re      *regexp.Regexp
-	literal []byte
+type Matcher struct {
+	Re      *regexp.Regexp
+	Literal []byte
 }
 
-type matchOpts struct {
-	fixedString     bool // -F: treat pattern as literal text
-	caseInsensitive bool // -i
-	wordBoundary    bool // -w: match only at word boundaries
+type MatchOpts struct {
+	FixedString     bool // -F: treat pattern as literal text
+	CaseInsensitive bool // -i
+	WordBoundary    bool // -w: match only at word boundaries
 }
 
-func (m *matcher) match(line []byte) bool {
-	if m.re == nil {
-		return bytes.Contains(line, m.literal)
+func (m *Matcher) Match(line []byte) bool {
+	if m.Re == nil {
+		return bytes.Contains(line, m.Literal)
 	}
-	if len(m.literal) > 0 && !bytes.Contains(line, m.literal) {
+	if len(m.Literal) > 0 && !bytes.Contains(line, m.Literal) {
 		return false
 	}
-	return m.re.Match(line)
+	return m.Re.Match(line)
 }
 
-func compileMatcher(pattern string, opts matchOpts) (*matcher, error) {
+func CompileMatcher(pattern string, opts MatchOpts) (*Matcher, error) {
 	if pattern == "" {
 		return nil, fmt.Errorf("empty pattern")
 	}
 
 	// If we're in pure fixed-string mode with no transformations, take the
 	// fast path: bytes.Contains, no regex engine at all.
-	if opts.fixedString && !opts.caseInsensitive && !opts.wordBoundary {
-		return &matcher{literal: []byte(pattern)}, nil
+	if opts.FixedString && !opts.CaseInsensitive && !opts.WordBoundary {
+		return &Matcher{Literal: []byte(pattern)}, nil
 	}
 
 	// Build the effective regex source by stacking transformations.
 	p := pattern
-	if opts.fixedString {
+	if opts.FixedString {
 		p = regexp.QuoteMeta(p)
 	}
-	if opts.wordBoundary {
+	if opts.WordBoundary {
 		p = `\b(?:` + p + `)\b`
 	}
-	if opts.caseInsensitive {
+	if opts.CaseInsensitive {
 		p = `(?i)` + p
 	}
 
@@ -62,12 +62,12 @@ func compileMatcher(pattern string, opts matchOpts) (*matcher, error) {
 	// Plain regex that parsed to a single literal (e.g. `_SUSPEND`)? Skip the
 	// regex engine entirely — but only when no transformations apply, since
 	// (?i) and \b… affect matching.
-	if !opts.fixedString && !opts.caseInsensitive && !opts.wordBoundary && isPureLiteral(tree) {
-		return &matcher{literal: []byte(pattern)}, nil
+	if !opts.FixedString && !opts.CaseInsensitive && !opts.WordBoundary && isPureLiteral(tree) {
+		return &Matcher{Literal: []byte(pattern)}, nil
 	}
 
 	literal := extractLiteral(tree)
-	if opts.caseInsensitive {
+	if opts.CaseInsensitive {
 		// The extracted literal is case-sensitive bytes; it can't be used as
 		// a pre-filter for a case-insensitive search without fold-aware
 		// substring matching, which the stdlib doesn't provide. Drop it.
@@ -78,7 +78,7 @@ func compileMatcher(pattern string, opts matchOpts) (*matcher, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &matcher{re: re, literal: literal}, nil
+	return &Matcher{Re: re, Literal: literal}, nil
 }
 
 func isPureLiteral(re *syntax.Regexp) bool {

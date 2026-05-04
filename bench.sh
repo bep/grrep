@@ -3,7 +3,7 @@ set -euo pipefail
 
 REGEX='[A-Z]+_SUSPEND'
 ROOT=/Volumes/LinuxBench/linux
-N=${N:-5}
+N=${N:-7}
 
 go build -o /tmp/mygrep . || exit 1
 
@@ -35,9 +35,9 @@ matches() {
 echo "$ROOT  (regex: $REGEX)"
 echo "n=$N iterations per variant; reporting median wall time"
 
-RG=(rg "$REGEX" "$ROOT")
-MY=(/tmp/mygrep "$REGEX" "$ROOT")
-UG=(ugrep -r --ignore-files --no-hidden -I "$REGEX" "$ROOT")
+RG=(rg -w -n --no-ignore-global "$REGEX" "$ROOT")
+MY=(/tmp/mygrep -w "$REGEX" "$ROOT")
+UG=(ugrep -r -w --ignore-files --no-hidden -I "$REGEX" "$ROOT")
 
 rg_rf=$(median "${RG[@]}")
 my_rf=$(median "${MY[@]}")
