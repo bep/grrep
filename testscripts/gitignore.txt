@@ -1,7 +1,7 @@
 
-mygrep OK
+grrep OK
 stdout './f1.txt:1:OK'
-! mygrep FAIL
+! grrep FAIL
 -- f1.txt --
 OK
 -- ignoreme/f2.txt --

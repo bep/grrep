@@ -1,4 +1,4 @@
-module github.com/bep/mygrep
+module github.com/bep/grrep
 
 go 1.25.5
 

@@ -1,7 +1,8 @@
-A small and [fast](#benchmark) recursive grep written in Go. Install with `go github.com/bep/mygrep@latest`.
+**grrep** <sup>_/[ɡɜːr]ep/_ Global Rapid Regular Expression Print</sup><br/><br/>
+A small and [fast](#benchmark) recursive grep written in Go. Install with `go github.com/bep/grrep@latest`.
 
 ```
-usage: mygrep [-q] [-F] [-i] [-w] [-v] [--no-ignore] PATTERN [PATH]
+usage: grrep [-q] [-F] [-i] [-w] [-v] [--no-ignore] PATTERN [PATH]
 
 Flags:
   -F            treat PATTERN as a fixed string, not a regex
@@ -14,7 +15,7 @@ Flags:
 
 ## Why
 
-I needed a search tool that plays nicely with [gitjoin](https://github.com/bep/gitjoin) — the joined-in subrepositories are listed as `.gitignore` entries in the host repo, and a normal grep would refuse to descend into them. mygrep skips the gitjoin-managed block when reading `.gitignore`, so the joined repos remain searchable as one tree.
+I needed a search tool that plays nicely with [gitjoin](https://github.com/bep/gitjoin) — the joined-in subrepositories are listed as `.gitignore` entries in the host repo, and a normal grep would refuse to descend into them. grrep skips the gitjoin-managed block when reading `.gitignore`, so the joined repos remain searchable as one tree.
 
 The other motivation was curiosity: how far Go and the standard library can take a tool like this before reaching for non-stdlib regex/SIMD or unsafe code.
 
@@ -42,9 +43,9 @@ Pattern: `[A-Z]+_SUSPEND` matched as a whole word (`-w`). All three tools find t
 
 | tool | median wall (n=7) |
 |---|---|
-| ugrep | 1.184s |
-| mygrep | 1.664s |
-| rg | 3.467s |
+| ugrep   | 1.184s |
+| grrep   | 1.664s |
+| ripgrep | 3.467s |
 
 Reproduce with `bash bench.sh`.
 

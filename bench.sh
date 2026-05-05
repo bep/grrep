@@ -5,7 +5,7 @@ REGEX='[A-Z]+_SUSPEND'
 ROOT=/Volumes/LinuxBench/linux
 N=${N:-7}
 
-go build -o /tmp/mygrep . || exit 1
+go build -o /tmp/grrep . || exit 1
 
 export TIMEFORMAT='%R'
 
@@ -36,7 +36,7 @@ echo "$ROOT  (regex: $REGEX)"
 echo "n=$N iterations per variant; reporting median wall time"
 
 RG=(rg -w -n --no-ignore-global "$REGEX" "$ROOT")
-MY=(/tmp/mygrep -w "$REGEX" "$ROOT")
+MY=(/tmp/grrep -w "$REGEX" "$ROOT")
 UG=(ugrep -r -w --ignore-files --no-hidden -I "$REGEX" "$ROOT")
 
 rg_rf=$(median "${RG[@]}")
@@ -50,6 +50,6 @@ ug_n=$(matches "${UG[@]}")
 printf '\n'
 printf '%10s %10s %10s %8s\n' "tool" "time" "matches" "ratio"
 printf '%10s %10s %10s %8s\n' "----------" "----------" "----------" "--------"
-printf '%10s %10s %10s %8s\n' "mygrep" "${my_rf}s" "$my_n" "$(ratio "$my_rf" "$my_rf")"
+printf '%10s %10s %10s %8s\n' "grrep" "${my_rf}s" "$my_n" "$(ratio "$my_rf" "$my_rf")"
 printf '%10s %10s %10s %8s\n' "ripgrep" "${rg_rf}s" "$rg_n" "$(ratio "$rg_rf" "$my_rf")"
 printf '%10s %10s %10s %8s\n' "ugrep" "${ug_rf}s" "$ug_n" "$(ratio "$ug_rf" "$my_rf")"

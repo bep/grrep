@@ -1,9 +1,9 @@
 # Literal.
-mygrep BAR
+grrep BAR
 stdout './words.txt:3:BAR'
 
 # Regexp.
-mygrep 'BA[RZ]'
+grrep 'BA[RZ]'
 stdout './words.txt:1:BAZ'
 stdout './words.txt:3:BAR'
 stdout './more/words.txt:1:BAR'

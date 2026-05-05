@@ -19,7 +19,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/bep/mygrep/internal"
+	"github.com/bep/grrep/internal"
 	"github.com/charlievieth/fastwalk"
 	"golang.org/x/sync/errgroup"
 )
@@ -112,7 +112,7 @@ func run() (bool, error) {
 	flag.StringVar(&mutexProfile, "profile-mutex", "", "")
 	flag.Usage = func() {
 		out := flag.CommandLine.Output()
-		fmt.Fprintln(out, "usage: mygrep [-q] [-F] [-i] [-w] [-v] [--no-ignore] PATTERN [PATH]")
+		fmt.Fprintln(out, "usage: grrep [-q] [-F] [-i] [-w] [-v] [--no-ignore] PATTERN [PATH]")
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "Flags:")
 		flag.VisitAll(func(f *flag.Flag) {
@@ -126,7 +126,7 @@ func run() (bool, error) {
 
 	args := flag.Args()
 	if len(args) < 1 {
-		return false, fmt.Errorf("usage: mygrep [-q] [-F] [-i] [-w] [-v] [--no-ignore] PATTERN [PATH]")
+		return false, fmt.Errorf("usage: grrep [-q] [-F] [-i] [-w] [-v] [--no-ignore] PATTERN [PATH]")
 	}
 	root := "."
 	if len(args) >= 2 {

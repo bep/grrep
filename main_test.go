@@ -17,6 +17,6 @@ func TestScripts(t *testing.T) {
 
 func TestMain(m *testing.M) {
 	testscript.Main(m, map[string]func(){
-		"mygrep": main,
+		"grrep": main,
 	})
 }

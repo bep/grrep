@@ -1,17 +1,17 @@
 # -F treats pattern as a literal: regex metacharacters are not interpreted
-mygrep -F 'a.b'
+grrep -F 'a.b'
 stdout '^./words.txt:1:a.b$'
 ! stdout 'aXb'
 ! stdout 'azb'
 
 # Without -F, '.' matches any character
-mygrep 'a.b'
+grrep 'a.b'
 stdout '^./words.txt:1:a.b$'
 stdout '^./words.txt:2:aXb$'
 stdout '^./words.txt:3:azb$'
 
 # -F combined with -w
-mygrep -F -w 'foo+bar'
+grrep -F -w 'foo+bar'
 stdout '^./fixed.txt:1:foo\+bar baz$'
 stdout '^./fixed.txt:4:hello foo\+bar!$'
 ! stdout 'xfoo\+bar'
