@@ -1,6 +1,16 @@
-# mygrep
+A small and [fast](#benchmark) recursive grep written in Go. Install with `go github.com/bep/mygrep@latest`.
 
-A small recursive grep written in Go.
+```
+usage: mygrep [-q] [-F] [-i] [-w] [-v] [--no-ignore] PATTERN [PATH]
+
+Flags:
+  -F            treat PATTERN as a fixed string, not a regex
+  -i            case-insensitive match
+  -no-ignore    do not respect .gitignore/.ignore files
+  -q            quiet: suppress match output
+  -v            select non-matching lines
+  -w            match only at word boundaries
+```
 
 ## Why
 

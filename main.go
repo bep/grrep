@@ -106,10 +106,22 @@ func run() (bool, error) {
 	flag.BoolVar(&opts.CaseInsensitive, "i", false, "case-insensitive match")
 	flag.BoolVar(&opts.WordBoundary, "w", false, "match only at word boundaries")
 	flag.BoolVar(&invert, "v", false, "select non-matching lines")
-	// Hidden profiling flags (no usage description so flag -h leaves them blank).
+	// Hidden profiling flags — registered but suppressed in -h via flag.Usage below.
 	flag.StringVar(&cpuProfile, "profile-cpu", "", "")
 	flag.StringVar(&memProfile, "profile-mem", "", "")
 	flag.StringVar(&mutexProfile, "profile-mutex", "", "")
+	flag.Usage = func() {
+		out := flag.CommandLine.Output()
+		fmt.Fprintln(out, "usage: mygrep [-q] [-F] [-i] [-w] [-v] [--no-ignore] PATTERN [PATH]")
+		fmt.Fprintln(out)
+		fmt.Fprintln(out, "Flags:")
+		flag.VisitAll(func(f *flag.Flag) {
+			if strings.HasPrefix(f.Name, "profile-") {
+				return
+			}
+			fmt.Fprintf(out, "  -%-12s %s\n", f.Name, f.Usage)
+		})
+	}
 	flag.Parse()
 
 	args := flag.Args()
