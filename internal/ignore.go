@@ -71,7 +71,7 @@ func (s *IgnoreSet) LoadDir(absDir, relDir string) {
 	if relDir != "" {
 		treePath = "/" + filepath.ToSlash(relDir)
 	}
-	s.tree.AddPatterns(treePath, lines...)
+	s.tree.InsertPatterns(treePath, lines...)
 }
 
 // Match reports whether rel (relative to root) is ignored.
