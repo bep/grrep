@@ -7,7 +7,7 @@ usage: grrep [-q] [-F] [-i] [-w] [-v] [--no-ignore] PATTERN [PATH]
 Flags:
   -F            treat PATTERN as a fixed string, not a regex
   -i            case-insensitive match
-  -no-ignore    do not respect .gitignore/.ignore files
+  --no-ignore   do not respect .gitignore/.ignore files
   -q            quiet: suppress match output
   -v            select non-matching lines
   -w            match only at word boundaries

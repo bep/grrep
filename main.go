@@ -119,7 +119,12 @@ func run() (bool, error) {
 			if strings.HasPrefix(f.Name, "profile-") {
 				return
 			}
-			fmt.Fprintf(out, "  -%-12s %s\n", f.Name, f.Usage)
+			// Single-character flags get -x, multi-character get --xxx (ripgrep-style).
+			name := "-" + f.Name
+			if len(f.Name) > 1 {
+				name = "--" + f.Name
+			}
+			fmt.Fprintf(out, "  %-13s %s\n", name, f.Usage)
 		})
 	}
 	flag.Parse()
