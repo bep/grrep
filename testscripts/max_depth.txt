@@ -1,0 +1,42 @@
+# --max-depth N limits how deep we recurse, matching ripgrep:
+#   -d 0 → search nothing
+#   -d 1 → root files only
+#   -d 2 → root + one subdir level
+# etc.
+
+# No limit: every HIT is found.
+grrep HIT
+stdout './root.txt:1:HIT'
+stdout './a/a.txt:1:HIT'
+stdout './a/b/b.txt:1:HIT'
+stdout './a/b/c/c.txt:1:HIT'
+
+# -d 0: nothing is searched, exit code 1 (no matches).
+! grrep -d 0 HIT
+! stdout 'HIT'
+
+# -d 1: only the root directory's own files.
+grrep -d 1 HIT
+stdout './root.txt:1:HIT'
+! stdout 'a/a.txt'
+! stdout 'a/b/b.txt'
+
+# -d 2: root + one subdir level.
+grrep -d 2 HIT
+stdout './root.txt:1:HIT'
+stdout './a/a.txt:1:HIT'
+! stdout 'a/b/b.txt'
+
+# Long form --max-depth=3 reaches one level further.
+grrep --max-depth=3 HIT
+stdout './a/b/b.txt:1:HIT'
+! stdout 'a/b/c/c.txt'
+
+-- root.txt --
+HIT
+-- a/a.txt --
+HIT
+-- a/b/b.txt --
+HIT
+-- a/b/c/c.txt --
+HIT

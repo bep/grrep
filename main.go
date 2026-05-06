@@ -77,14 +77,15 @@ func writeProfile(name, path string) {
 }
 
 type grepper struct {
-	m       *internal.Matcher
-	root    string
-	quiet   bool
-	invert  bool // -v: emit non-matching lines instead
-	ctx     context.Context
-	paths   chan string
-	results chan []byte
-	ignores *internal.IgnoreSet // nil if --no-ignore
+	m        *internal.Matcher
+	root     string
+	quiet    bool
+	invert   bool // -v: emit non-matching lines instead
+	maxDepth int  // 0 = unlimited; passed through to fastwalk.Config
+	ctx      context.Context
+	paths    chan string
+	results  chan []byte
+	ignores  *internal.IgnoreSet // nil if --no-ignore
 
 	numWorkersDirWalker   int
 	numWorkersFileScanner int
@@ -96,6 +97,7 @@ func run() (bool, error) {
 		noIgnore     bool
 		opts         internal.MatchOpts
 		invert       bool
+		maxDepth     int
 		cpuProfile   string
 		memProfile   string
 		mutexProfile string
@@ -106,17 +108,19 @@ func run() (bool, error) {
 	flag.BoolVar(&opts.CaseInsensitive, "i", false, "case-insensitive match")
 	flag.BoolVar(&opts.WordBoundary, "w", false, "match only at word boundaries")
 	flag.BoolVar(&invert, "v", false, "select non-matching lines")
+	flag.IntVar(&maxDepth, "max-depth", -1, "search at most N directory levels (1 = root only, 0 = nothing)")
+	flag.IntVar(&maxDepth, "d", -1, "") // alias for --max-depth; suppressed in -h, paired with it below
 	// Hidden profiling flags — registered but suppressed in -h via flag.Usage below.
 	flag.StringVar(&cpuProfile, "profile-cpu", "", "")
 	flag.StringVar(&memProfile, "profile-mem", "", "")
 	flag.StringVar(&mutexProfile, "profile-mutex", "", "")
 	flag.Usage = func() {
 		out := flag.CommandLine.Output()
-		fmt.Fprintln(out, "usage: grrep [-q] [-F] [-i] [-w] [-v] [--no-ignore] PATTERN [PATH]")
+		fmt.Fprintln(out, "usage: grrep [-q] [-F] [-i] [-w] [-v] [-d N] [--no-ignore] PATTERN [PATH]")
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "Flags:")
 		flag.VisitAll(func(f *flag.Flag) {
-			if strings.HasPrefix(f.Name, "profile-") {
+			if strings.HasPrefix(f.Name, "profile-") || f.Usage == "" {
 				return
 			}
 			// Single-character flags get -x, multi-character get --xxx (ripgrep-style).
@@ -124,14 +128,18 @@ func run() (bool, error) {
 			if len(f.Name) > 1 {
 				name = "--" + f.Name
 			}
-			fmt.Fprintf(out, "  %-13s %s\n", name, f.Usage)
+			// Pair known short aliases with their long form.
+			if f.Name == "max-depth" {
+				name = "-d, " + name + "=N"
+			}
+			fmt.Fprintf(out, "  %-18s %s\n", name, f.Usage)
 		})
 	}
 	flag.Parse()
 
 	args := flag.Args()
 	if len(args) < 1 {
-		return false, fmt.Errorf("usage: grrep [-q] [-F] [-i] [-w] [-v] [--no-ignore] PATTERN [PATH]")
+		return false, fmt.Errorf("usage: grrep [-q] [-F] [-i] [-w] [-v] [-d N] [--no-ignore] PATTERN [PATH]")
 	}
 	root := "."
 	if len(args) >= 2 {
@@ -182,6 +190,7 @@ func run() (bool, error) {
 		root:                  root,
 		quiet:                 quiet,
 		invert:                invert,
+		maxDepth:              maxDepth,
 		ctx:                   gCtx,
 		paths:                 make(chan string, 256),
 		results:               make(chan []byte, 64),
@@ -224,7 +233,18 @@ func run() (bool, error) {
 
 func (g *grepper) walk() error {
 	defer close(g.paths)
-	cfg := &fastwalk.Config{NumWorkers: g.numWorkersDirWalker}
+	// -d 0 means "search nothing" (matches ripgrep). fastwalk's MaxDepth=0 is the
+	// unlimited sentinel, so we can't express that through fastwalk — short-circuit.
+	if g.maxDepth == 0 {
+		return nil
+	}
+	// For N >= 1, fastwalk's MaxDepth=N already aligns with ripgrep's -d N
+	// (root dir counts as one level in both). Negative means unset → unlimited.
+	fwMaxDepth := 0
+	if g.maxDepth > 0 {
+		fwMaxDepth = g.maxDepth
+	}
+	cfg := &fastwalk.Config{NumWorkers: g.numWorkersDirWalker, MaxDepth: fwMaxDepth}
 	err := fastwalk.Walk(cfg, g.root, func(path string, d fs.DirEntry, err error) error {
 		if g.ctx.Err() != nil {
 			return fs.SkipAll
