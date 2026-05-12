@@ -81,6 +81,7 @@ type grepper struct {
 	root     string
 	quiet    bool
 	invert   bool // -v: emit non-matching lines instead
+	hidden   bool // --hidden: descend into dot-dirs/files (.git is always skipped)
 	maxDepth int  // 0 = unlimited; passed through to fastwalk.Config
 	ctx      context.Context
 	paths    chan string
@@ -97,6 +98,7 @@ func run() (bool, error) {
 		noIgnore     bool
 		opts         internal.MatchOpts
 		invert       bool
+		hidden       bool
 		maxDepth     int
 		cpuProfile   string
 		memProfile   string
@@ -108,6 +110,7 @@ func run() (bool, error) {
 	flag.BoolVar(&opts.CaseInsensitive, "i", false, "case-insensitive match")
 	flag.BoolVar(&opts.WordBoundary, "w", false, "match only at word boundaries")
 	flag.BoolVar(&invert, "v", false, "select non-matching lines")
+	flag.BoolVar(&hidden, "hidden", false, "search hidden files and directories (.git is always skipped)")
 	flag.IntVar(&maxDepth, "max-depth", -1, "search at most N directory levels (1 = root only, 0 = nothing)")
 	flag.IntVar(&maxDepth, "d", -1, "") // alias for --max-depth; suppressed in -h, paired with it below
 	// Hidden profiling flags — registered but suppressed in -h via flag.Usage below.
@@ -116,7 +119,7 @@ func run() (bool, error) {
 	flag.StringVar(&mutexProfile, "profile-mutex", "", "")
 	flag.Usage = func() {
 		out := flag.CommandLine.Output()
-		fmt.Fprintln(out, "usage: grrep [-q] [-F] [-i] [-w] [-v] [-d N] [--no-ignore] PATTERN [PATH]")
+		fmt.Fprintln(out, "usage: grrep [-q] [-F] [-i] [-w] [-v] [-d N] [--hidden] [--no-ignore] PATTERN [PATH]")
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "Flags:")
 		flag.VisitAll(func(f *flag.Flag) {
@@ -139,7 +142,7 @@ func run() (bool, error) {
 
 	args := flag.Args()
 	if len(args) < 1 {
-		return false, fmt.Errorf("usage: grrep [-q] [-F] [-i] [-w] [-v] [-d N] [--no-ignore] PATTERN [PATH]")
+		return false, fmt.Errorf("usage: grrep [-q] [-F] [-i] [-w] [-v] [-d N] [--hidden] [--no-ignore] PATTERN [PATH]")
 	}
 	root := "."
 	if len(args) >= 2 {
@@ -190,6 +193,7 @@ func run() (bool, error) {
 		root:                  root,
 		quiet:                 quiet,
 		invert:                invert,
+		hidden:                hidden,
 		maxDepth:              maxDepth,
 		ctx:                   gCtx,
 		paths:                 make(chan string, 256),
@@ -254,8 +258,15 @@ func (g *grepper) walk() error {
 		}
 		name := d.Name()
 		if d.IsDir() {
-			if path != g.root && strings.HasPrefix(name, ".") {
-				return fs.SkipDir
+			if path != g.root {
+				// .git is always skipped, even with --hidden: it's a VCS
+				// internals directory, not something users want to grep.
+				if name == ".git" {
+					return fs.SkipDir
+				}
+				if !g.hidden && strings.HasPrefix(name, ".") {
+					return fs.SkipDir
+				}
 			}
 			if g.ignores != nil && path != g.root {
 				rel, err := filepath.Rel(g.root, path)
@@ -270,7 +281,7 @@ func (g *grepper) walk() error {
 			}
 			return nil
 		}
-		if strings.HasPrefix(name, ".") {
+		if !g.hidden && strings.HasPrefix(name, ".") {
 			return nil
 		}
 		if !d.Type().IsRegular() {

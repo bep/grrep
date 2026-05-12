@@ -1,0 +1,23 @@
+# By default, dot-files and dot-directories are skipped.
+grrep HIT
+stdout './visible.txt:1:HIT'
+! stdout '\.hidden\.txt'
+! stdout '\.github/'
+! stdout '\.git/'
+
+# --hidden descends into dot-directories and matches dot-files,
+# but .git is still skipped.
+grrep --hidden HIT
+stdout './visible.txt:1:HIT'
+stdout './\.hidden\.txt:1:HIT'
+stdout './\.github/workflows/ci\.yml:1:HIT'
+! stdout '\.git/'
+
+-- visible.txt --
+HIT
+-- .hidden.txt --
+HIT
+-- .github/workflows/ci.yml --
+HIT
+-- .git/config --
+HIT
