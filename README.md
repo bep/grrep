@@ -2,12 +2,13 @@
 A small and [fast](#benchmark) recursive grep written in Go. Install with `go github.com/bep/grrep@latest`.
 
 ```
-usage: grrep [-q] [-F] [-i] [-w] [-v] [-d N] [--no-ignore] PATTERN [PATH]
+usage: grrep [-q] [-F] [-i] [-w] [-v] [-d N] [--hidden] [--no-ignore] PATTERN [PATH]
 
 Flags:
   -F                 treat PATTERN as a fixed string, not a regex
   -i                 case-insensitive match
   -d, --max-depth=N  search at most N directory levels (1 = root only, 0 = nothing)
+  --hidden           search hidden files and directories (.git is always skipped)
   --no-ignore        do not respect .gitignore/.ignore files
   -q                 quiet: suppress match output
   -v                 select non-matching lines
@@ -25,7 +26,7 @@ The other motivation was curiosity: how far Go and the standard library can take
 * Honors `.gitignore` and `.ignore` files in the search tree.
 * Does **not** honor `~/.gitignore_global`.
 * Skips the `# Managed by gitjoin … # End gitjoin managed section` block when reading any `.gitignore`.
-* Skips hidden files and directories.
+* Skips hidden files and directories by default; pass `--hidden` to include them (`.git` is always skipped).
 * Skips files whose first 8 KiB contain a NUL byte (binary heuristic).
 
 ## Benchmark
