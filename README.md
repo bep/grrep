@@ -1,5 +1,5 @@
 **grrep** <sup>_/[ɡɜːr]ep/_ Global Rapid Regular Expression Print</sup><br/><br/>
-A small and [fast](#benchmark) recursive grep written in Go. Install with `go github.com/bep/grrep@latest`.
+A small and [fast](#benchmark) recursive grep written in Go. Install with `go install github.com/bep/grrep@latest`.
 
 ```
 usage: grrep [-q] [-F] [-i] [-w] [-v] [-d N] [--hidden] [--no-ignore] PATTERN [PATH]
