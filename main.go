@@ -229,11 +229,9 @@ func run() (bool, error) {
 	eg.Go(func() error {
 		var wg sync.WaitGroup
 		for i := 0; i < g.numWorkersFileScanner; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				g.worker()
-			}()
+			})
 		}
 		wg.Wait()
 		close(g.results)
@@ -263,10 +261,7 @@ func (g *grepper) walk() error {
 	}
 	// For N >= 1, fastwalk's MaxDepth=N already aligns with ripgrep's -d N
 	// (root dir counts as one level in both). Negative means unset → unlimited.
-	fwMaxDepth := 0
-	if g.maxDepth > 0 {
-		fwMaxDepth = g.maxDepth
-	}
+	fwMaxDepth := max(g.maxDepth, 0)
 	cfg := &fastwalk.Config{NumWorkers: g.numWorkersDirWalker, MaxDepth: fwMaxDepth}
 	err := fastwalk.Walk(cfg, g.root, func(path string, d fs.DirEntry, err error) error {
 		if g.ctx.Err() != nil {
@@ -377,10 +372,7 @@ func (g *grepper) scanFile(path string) []byte {
 // scanWholeBody finds matches by sliding bytes.Index over data. Cheap when a
 // file has no matches at all — one bytes.Index call returns -1 and we're done.
 func (g *grepper) scanWholeBody(path string, data []byte) []byte {
-	headLimit := len(data)
-	if headLimit > peekSize {
-		headLimit = peekSize
-	}
+	headLimit := min(len(data), peekSize)
 	if bytes.IndexByte(data[:headLimit], 0) >= 0 {
 		return nil
 	}
