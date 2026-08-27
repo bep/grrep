@@ -54,6 +54,15 @@ func main() {
 	}
 }
 
+// emit writes one match line as path:num:line, or path:line with -N.
+func (g *grepper) emit(out *bytes.Buffer, path string, lineNum int, line []byte) {
+	if g.noLineNum {
+		fmt.Fprintf(out, "%s:%s\n", path, line)
+		return
+	}
+	fmt.Fprintf(out, "%s:%d:%s\n", path, lineNum, line)
+}
+
 // trimCR strips a trailing carriage return from line. Combined with the
 // per-scan-path \n stripping, this normalizes both LF and CRLF line endings
 // so output and regex matches don't see a stray \r at the end.
@@ -77,16 +86,17 @@ func writeProfile(name, path string) {
 }
 
 type grepper struct {
-	m        *internal.Matcher
-	root     string
-	quiet    bool
-	invert   bool // -v: emit non-matching lines instead
-	hidden   bool // --hidden: descend into dot-dirs/files (.git is always skipped)
-	maxDepth int  // 0 = unlimited; passed through to fastwalk.Config
-	ctx      context.Context
-	paths    chan string
-	results  chan []byte
-	ignores  *internal.IgnoreSet // nil if --no-ignore
+	m         *internal.Matcher
+	root      string
+	quiet     bool
+	invert    bool // -v: emit non-matching lines instead
+	hidden    bool // --hidden: descend into dot-dirs/files (.git is always skipped)
+	noLineNum bool // -N: emit path:line instead of path:num:line
+	maxDepth  int  // 0 = unlimited; passed through to fastwalk.Config
+	ctx       context.Context
+	paths     chan string
+	results   chan []byte
+	ignores   *internal.IgnoreSet // nil if --no-ignore
 
 	numWorkersDirWalker   int
 	numWorkersFileScanner int
@@ -99,6 +109,8 @@ func run() (bool, error) {
 		opts         internal.MatchOpts
 		invert       bool
 		hidden       bool
+		lineNum      bool
+		noLineNum    bool
 		maxDepth     int
 		cpuProfile   string
 		memProfile   string
@@ -110,6 +122,9 @@ func run() (bool, error) {
 	flag.BoolVar(&opts.CaseInsensitive, "i", false, "case-insensitive match")
 	flag.BoolVar(&opts.WordBoundary, "w", false, "match only at word boundaries")
 	flag.BoolVar(&invert, "v", false, "select non-matching lines")
+	flag.BoolVar(&lineNum, "n", false, "show line numbers (the default; accepted for grep compatibility)")
+	flag.BoolVar(&noLineNum, "no-line-number", false, "suppress line numbers")
+	flag.BoolVar(&noLineNum, "N", false, "") // alias for --no-line-number; suppressed in -h, paired with it below
 	flag.BoolVar(&hidden, "hidden", false, "search hidden files and directories (.git is always skipped)")
 	flag.IntVar(&maxDepth, "max-depth", -1, "search at most N directory levels (1 = root only, 0 = nothing)")
 	flag.IntVar(&maxDepth, "d", -1, "") // alias for --max-depth; suppressed in -h, paired with it below
@@ -119,7 +134,7 @@ func run() (bool, error) {
 	flag.StringVar(&mutexProfile, "profile-mutex", "", "")
 	flag.Usage = func() {
 		out := flag.CommandLine.Output()
-		fmt.Fprintln(out, "usage: grrep [-q] [-F] [-i] [-w] [-v] [-d N] [--hidden] [--no-ignore] PATTERN [PATH]")
+		fmt.Fprintln(out, "usage: grrep [-q] [-F] [-i] [-w] [-v] [-n] [-N] [-d N] [--hidden] [--no-ignore] PATTERN [PATH]")
 		fmt.Fprintln(out)
 		fmt.Fprintln(out, "Flags:")
 		flag.VisitAll(func(f *flag.Flag) {
@@ -132,17 +147,20 @@ func run() (bool, error) {
 				name = "--" + f.Name
 			}
 			// Pair known short aliases with their long form.
-			if f.Name == "max-depth" {
+			switch f.Name {
+			case "max-depth":
 				name = "-d, " + name + "=N"
+			case "no-line-number":
+				name = "-N, " + name
 			}
-			fmt.Fprintf(out, "  %-18s %s\n", name, f.Usage)
+			fmt.Fprintf(out, "  %-21s %s\n", name, f.Usage)
 		})
 	}
 	flag.Parse()
 
 	args := flag.Args()
 	if len(args) < 1 {
-		return false, fmt.Errorf("usage: grrep [-q] [-F] [-i] [-w] [-v] [-d N] [--hidden] [--no-ignore] PATTERN [PATH]")
+		return false, fmt.Errorf("usage: grrep [-q] [-F] [-i] [-w] [-v] [-n] [-N] [-d N] [--hidden] [--no-ignore] PATTERN [PATH]")
 	}
 	root := "."
 	if len(args) >= 2 {
@@ -194,6 +212,7 @@ func run() (bool, error) {
 		quiet:                 quiet,
 		invert:                invert,
 		hidden:                hidden,
+		noLineNum:             noLineNum,
 		maxDepth:              maxDepth,
 		ctx:                   gCtx,
 		paths:                 make(chan string, 256),
@@ -401,7 +420,7 @@ func (g *grepper) scanWholeBody(path string, data []byte) []byte {
 			if g.quiet {
 				return []byte{}
 			}
-			fmt.Fprintf(&out, "%s:%d:%s\n", path, lineNum, line)
+			g.emit(&out, path, lineNum, line)
 		}
 		// Advance past this line so we don't re-match on it.
 		cursor = lineEnd
@@ -442,7 +461,7 @@ func (g *grepper) scanWholeRegex(path string, data []byte) []byte {
 		// Multiple regex hits can land on the same line — emit the line once.
 		if lineEnd != prevLineEnd {
 			line := trimCR(data[lineStart:lineEnd])
-			fmt.Fprintf(&out, "%s:%d:%s\n", path, lineNum, line)
+			g.emit(&out, path, lineNum, line)
 			prevLineEnd = lineEnd
 		}
 		cursor = matchPos
@@ -467,7 +486,7 @@ func (g *grepper) scanInverted(path string, data []byte) []byte {
 			if g.quiet {
 				return []byte{}
 			}
-			fmt.Fprintf(&out, "%s:%d:%s\n", path, lineNum, line)
+			g.emit(&out, path, lineNum, line)
 		}
 		start = end + 1
 		lineNum++
@@ -508,7 +527,7 @@ func (g *grepper) scanFileStream(path string, f *os.File) []byte {
 				if g.quiet {
 					return []byte{}
 				}
-				fmt.Fprintf(&out, "%s:%d:%s\n", path, lineNum, line)
+				g.emit(&out, path, lineNum, line)
 			}
 		}
 		if err != nil {

@@ -2,17 +2,19 @@
 A small and [fast](#benchmark) recursive grep written in Go. Install with `go install github.com/bep/grrep@latest`.
 
 ```
-usage: grrep [-q] [-F] [-i] [-w] [-v] [-d N] [--hidden] [--no-ignore] PATTERN [PATH]
+usage: grrep [-q] [-F] [-i] [-w] [-v] [-n] [-N] [-d N] [--hidden] [--no-ignore] PATTERN [PATH]
 
 Flags:
-  -F                 treat PATTERN as a fixed string, not a regex
-  -i                 case-insensitive match
-  -d, --max-depth=N  search at most N directory levels (1 = root only, 0 = nothing)
-  --hidden           search hidden files and directories (.git is always skipped)
-  --no-ignore        do not respect .gitignore/.ignore files
-  -q                 quiet: suppress match output
-  -v                 select non-matching lines
-  -w                 match only at word boundaries
+  -F                    treat PATTERN as a fixed string, not a regex
+  -i                    case-insensitive match
+  -d, --max-depth=N     search at most N directory levels (1 = root only, 0 = nothing)
+  --hidden              search hidden files and directories (.git is always skipped)
+  -n                    show line numbers (the default; accepted for grep compatibility)
+  -N, --no-line-number  suppress line numbers
+  --no-ignore           do not respect .gitignore/.ignore files
+  -q                    quiet: suppress match output
+  -v                    select non-matching lines
+  -w                    match only at word boundaries
 ```
 
 ## Why

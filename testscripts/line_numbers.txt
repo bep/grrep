@@ -1,0 +1,26 @@
+# -n is a no-op: line numbers are always on.
+grrep -n BAR
+stdout '^\./words.txt:3:BAR$'
+
+# -N suppresses line numbers.
+grrep -N BAR
+stdout '^\./words.txt:BAR$'
+! stdout ':3:'
+
+# Long form.
+grrep --no-line-number BAR
+stdout '^\./words.txt:BAR$'
+
+# -N with regex path.
+grrep -N 'BA[RZ]'
+stdout '^\./words.txt:BAZ$'
+stdout '^\./words.txt:BAR$'
+
+# -N with invert.
+grrep -N -v 'BA'
+stdout '^\./words.txt:FOO$'
+
+-- words.txt --
+BAZ
+FOO
+BAR
